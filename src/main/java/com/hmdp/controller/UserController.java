@@ -17,7 +17,7 @@ import javax.annotation.Resource;
 import javax.servlet.http.HttpSession;
 
 /**
- * 前端控制器
+ * 用户-前端控制器
  */
 @Slf4j
 @RestController
@@ -66,12 +66,9 @@ public class UserController {
      */
     @GetMapping("/me")
     public Result me() {
-        log.info("获取当前登录的用户信息");
+        log.info("获取当前登录的用户信息...");
         // 拦截器已经把用户信息放到了UserHolder中了，这里直接取就行
         UserDTO userDTO = UserHolder.getUser();
-
-        //User user = new User();
-        //BeanUtils.copyProperties(userDTO, user);
 
         return Result.ok(userDTO);
     }

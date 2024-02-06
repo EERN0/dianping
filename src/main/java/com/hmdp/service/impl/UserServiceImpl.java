@@ -94,7 +94,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         // 7.3 把用户信息存到Redis
         String tokenKey = LOGIN_USER_KEY + token;
         stringRedisTemplate.opsForHash().putAll(tokenKey, userMap); // put存储value一次值能存一个hashKey-value，所以用putAll
-        stringRedisTemplate.expire(tokenKey, LOGIN_USER_TTL, TimeUnit.MINUTES);  // 设置过期时间
+        stringRedisTemplate.expire(tokenKey, LOGIN_USER_TTL, TimeUnit.SECONDS);  // 设置过期时间
 
         // 8.返回token给客户端
         return Result.ok(token);
