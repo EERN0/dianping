@@ -12,12 +12,7 @@ import java.io.Serializable;
 import java.time.LocalDateTime;
 
 /**
- * <p>
- * 
- * </p>
- *
- * @author 虎哥
- * @since 2021-12-22
+ * 优惠券: 普通优惠券+秒杀优惠券
  */
 @Data
 @EqualsAndHashCode(callSuper = false)
@@ -72,6 +67,7 @@ public class Voucher implements Serializable {
      * 优惠券类型
      */
     private Integer status;
+
     /**
      * 库存
      */
@@ -100,6 +96,4 @@ public class Voucher implements Serializable {
      * 更新时间
      */
     private LocalDateTime updateTime;
-
-
 }
