@@ -16,4 +16,6 @@ public interface IVoucherOrderService extends IService<VoucherOrder> {
      * @param voucherId 优惠券id
      */
     Result seckikllVoucher(Long voucherId);
+
+    Result createVoucherOrder(Long voucherId);
 }
