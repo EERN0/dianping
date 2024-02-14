@@ -8,9 +8,11 @@ import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IVoucherOrderService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.utils.RedisIdWorker;
+import com.hmdp.utils.SimpleRedisLock;
 import com.hmdp.utils.UserHolder;
 import lombok.Synchronized;
 import org.springframework.aop.framework.AopContext;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,9 +27,10 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
     @Resource
     private ISeckillVoucherService seckillVoucherService;   // 秒杀券service
-
     @Resource
     private RedisIdWorker redisIdWorker;
+    @Resource
+    private StringRedisTemplate stringRedisTemplate;
 
     /**
      * 优惠券秒杀下单
@@ -53,10 +56,22 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
         // 先提交事务，再释放锁。避免事务没提交就释放锁了
         Long userId = UserHolder.getUser().getId();
-        synchronized (userId.toString().intern()) { // intern()方法保证常量池对象唯一，而非new一个新的对象。当userId的值一样时，锁就一样
+        // 1-创建锁对象，一个用户id一把锁
+        SimpleRedisLock lock = new SimpleRedisLock("order:" + userId, stringRedisTemplate);
+        // 2-获取锁
+        boolean isLock = lock.tryLock(1200);
+        // 3-判断是否获取锁成功
+        if (!isLock) {
+            // 获取锁失败
+            return Result.fail("同一用户不允许重复下单!");
+        }
+        try {
             // 获取当前对象的代理对象（事务）。因为spring事务是通过代理对象执行的，而方法是当前类对象this，不是一个对象
             IVoucherOrderService proxy = (IVoucherOrderService) AopContext.currentProxy();  // 获取当前对象的代理对象
             return proxy.createVoucherOrder(voucherId);
+        } finally {
+            // 4-释放锁
+            lock.unlock();
         }
     }
 
