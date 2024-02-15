@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.*;
 import javax.annotation.Resource;
 
 /**
- * 前端控制器
+ * 店铺-前端控制器
  */
 @Slf4j
 @RestController
@@ -31,7 +31,7 @@ public class ShopController {
      */
     @GetMapping("/{id}")
     public Result queryShopById(@PathVariable("id") Long id) {
-        log.info("查询商铺详情，id: {}", id);
+        //log.info("查询商铺详情，id: {}", id);
         return shopService.queryById(id);
     }
 
@@ -44,22 +44,16 @@ public class ShopController {
     @PostMapping
     public Result saveShop(@RequestBody Shop shop) {
         // 写入数据库
-        shopService.save(shop);
-        // 返回店铺id
-        return Result.ok(shop.getId());
+        return Result.ok();
     }
 
     /**
      * 更新商铺信息
-     *
-     * @param shop 商铺数据
-     * @return 无
      */
     @PutMapping
     public Result updateShop(@RequestBody Shop shop) {
-        // 写入数据库
-        shopService.updateById(shop);
-        return Result.ok();
+        log.info("更新商铺信息，shop: {}", shop);
+        return shopService.update(shop);
     }
 
     /**
