@@ -6,6 +6,8 @@
 local voucherId = ARGV[1]
 -- 1.2 用户id
 local userId = ARGV[2]
+-- 1.3 订单id
+local orderId = ARGV[3]
 
 -- 2.秒杀券在redis中的key
 -- 2.1 库存key (value是秒杀券的库存)
@@ -28,5 +30,8 @@ end
 redis.call('incrby', stockKey, -1)
 -- 3.5 用户下单，保存用户 --> 将userId存入到订单集合中 sadd orderKey userId
 redis.call('sadd', orderKey, userId)
+-- 3.6 发送消息到队列中 XADD stream.order * k1 v1 k2 v2 ...
+redis.call('xadd', 'stream.orders', '*', 'userId', userId, 'voucherId', voucherId, 'id', orderId)
+
 -- 4.成功，返回0
 return 0

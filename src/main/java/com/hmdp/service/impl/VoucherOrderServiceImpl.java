@@ -1,5 +1,6 @@
 package com.hmdp.service.impl;
 
+import cn.hutool.core.bean.BeanUtil;
 import com.hmdp.dto.Result;
 import com.hmdp.entity.SeckillVoucher;
 import com.hmdp.entity.VoucherOrder;
@@ -16,6 +17,7 @@ import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.aop.framework.AopContext;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.data.redis.connection.stream.*;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
@@ -23,8 +25,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.Resource;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.*;
 
 /**
@@ -52,8 +57,6 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         SECKILL_SCRIPT.setResultType(Long.class);
     }
 
-    // 阻塞队列
-    private final BlockingQueue<VoucherOrder> orderTasks = new ArrayBlockingQueue<>(1024 * 1024);
     // 线程池
     private static final ExecutorService SECKILL_ORDER_EXECUTOR = Executors.newSingleThreadExecutor(); // 单线程的线程池
 
@@ -65,20 +68,95 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
     // 任务类
     private class VoucherOrderHandler implements Runnable {
+        String queueName = "stream.orders";  // 消息队列名字
+
         @Override
         public void run() {
             while (true) {
                 try {
-                    // 1.获取队列中的订单信息
-                    VoucherOrder order = orderTasks.take();
-                    // 2.创建订单
-                    handleVoucherOrder(order);
-                } catch (InterruptedException e) {
+                    // 1.获取消息队列中的订单信息
+                    // XREADGROUP GROUP g1 c1(消费者组g1的c1消费者) COUNT 1(读1条消息) BLOCK 2000(阻塞2s) STREAMS stream.order(消息队列名) >(读最新的消息)
+                    List<MapRecord<String, Object, Object>> list = stringRedisTemplate.opsForStream().read(
+                            Consumer.from("g1", "c1"),
+                            StreamReadOptions.empty().count(1).block(Duration.ofSeconds(2)),
+                            StreamOffset.create(queueName, ReadOffset.lastConsumed())
+                    );
+                    // 2. 判断消息获取是否成功
+                    if (list == null || list.isEmpty()) {
+                        // 获取失败，说明没有消息，继续下一次循环
+                        continue;
+                    }
+                    // 3. 解析消息中的订单消息
+                    MapRecord<String, Object, Object> record = list.get(0);
+                    Map<Object, Object> values = record.getValue();
+                    VoucherOrder voucherOrder = BeanUtil.fillBeanWithMap(values, new VoucherOrder(), true);
+                    // 4. 如果获取成功，可以下单
+                    handleVoucherOrder(voucherOrder);
+                    // 5. ACK确认 SACK stream.orders g1 id
+                    stringRedisTemplate.opsForStream().acknowledge(queueName, "g1", record.getId());
+                } catch (Exception e) {
                     log.error("处理订单异常", e);
+                    handlePendingList();
                 }
             }
         }
+
+        // pending-list中消息处理
+        private void handlePendingList() {
+            while (true) {
+                try {
+                    // 1.获取pending-list中的订单信息
+                    // XREADGROUP GROUP g1 c1 COUNT 1 STREAMS stream.order 0
+                    List<MapRecord<String, Object, Object>> list = stringRedisTemplate.opsForStream().read(
+                            Consumer.from("g1", "c1"),
+                            StreamReadOptions.empty().count(1),
+                            StreamOffset.create(queueName, ReadOffset.from("0"))
+                    );
+                    // 2. 判断消息获取是否成功
+                    if (list == null || list.isEmpty()) {
+                        // 获取失败，说明pending-list没有消息，结束循环
+                        break;
+                    }
+                    // 3. 解析消息中的订单消息
+                    MapRecord<String, Object, Object> record = list.get(0);
+                    Map<Object, Object> values = record.getValue();
+                    VoucherOrder voucherOrder = BeanUtil.fillBeanWithMap(values, new VoucherOrder(), true);
+                    // 4. 如果获取成功，可以下单
+                    handleVoucherOrder(voucherOrder);
+                    // 5. ACK确认 SACK stream.orders g1 id
+                    stringRedisTemplate.opsForStream().acknowledge(queueName, "g1", record.getId());
+                } catch (Exception e) {
+                    log.error("处理pending-list异常", e);
+                    try {
+                        Thread.sleep(20);
+                    } catch (InterruptedException ex) {
+                        throw new RuntimeException(ex);
+                    }
+                }
+            }
+
+        }
     }
+
+    //// 阻塞队列（最新版本，不再使用阻塞队列）
+    //private final BlockingQueue<VoucherOrder> orderTasks = new ArrayBlockingQueue<>(1024 * 1024);
+    //
+    //// 任务类
+    //private class VoucherOrderHandler implements Runnable {
+    //    @Override
+    //    public void run() {
+    //        while (true) {
+    //            try {
+    //                // 1.获取阻塞队列中的订单信息
+    //                VoucherOrder order = orderTasks.take();
+    //                // 2.创建订单
+    //                handleVoucherOrder(order);
+    //            } catch (InterruptedException e) {
+    //                log.error("处理订单异常", e);
+    //            }
+    //        }
+    //    }
+    //}
 
     // 异步处理，不再需要返回值了
     private void handleVoucherOrder(VoucherOrder voucherOrder) {
@@ -105,19 +183,22 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     // 当前对象的代理对象（为了让子线程能够拿到父线程的同一个代理对象）
     private IVoucherOrderService proxy;  // 获取当前对象的代理对象
 
+
     /**
-     * [优惠券秒杀下单]新版本：使用lua脚本
+     * [优惠券秒杀下单]最新版本：使用lua脚本+redis消息队列
      *
      * @param voucherId 优惠券id
      */
     public Result seckillVoucher(Long voucherId) {
         // 获取用户id
         Long userId = UserHolder.getUser().getId();
+        // 订单id
+        long orderId = redisIdWorker.generateId("order");
         // 1.执行lua脚本，判断用户有无购买资格
         Long result = stringRedisTemplate.execute(
                 SECKILL_SCRIPT,
                 Collections.emptyList(),
-                voucherId.toString(), userId.toString()
+                voucherId.toString(), userId.toString(), String.valueOf(orderId)
         );
         // 2.判断结果是否为0
         int r = result.intValue();
@@ -125,18 +206,19 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             // 2.1 不为0，没有购买资格
             return Result.fail(r == 1 ? "库存不足" : "不能重复下单");
         }
-        // 2.2 为0，用户有购买资格，把下单信息(优惠券订单信息)保存到阻塞队列
-        // 订单id
-        long orderId = redisIdWorker.generateId("order");
-        VoucherOrder voucherOrder = new VoucherOrder();
-        // 2.3 生成订单id
-        voucherOrder.setId(orderId);    // 订单id，并非主键自增的，按照自定义规则生成
-        // 2.4 用户id
-        voucherOrder.setUserId(userId);
-        // 2.5 优惠券id
-        voucherOrder.setVoucherId(voucherId);
-        // 2.6 订单放入阻塞队列，交给异步线程处理
-        orderTasks.add(voucherOrder);
+        // 下面这段注释的在新lua脚本里完成了
+
+        //// 2.2 为0，用户有购买资格，把下单信息(优惠券订单信息)保存到阻塞队列
+        //
+        //VoucherOrder voucherOrder = new VoucherOrder();
+        //// 2.3 生成订单id
+        //voucherOrder.setId(orderId);    // 订单id，并非主键自增的，按照自定义规则生成
+        //// 2.4 用户id
+        //voucherOrder.setUserId(userId);
+        //// 2.5 优惠券id
+        //voucherOrder.setVoucherId(voucherId);
+        //// 2.6 订单放入阻塞队列，交给异步线程处理
+        //orderTasks.add(voucherOrder);
 
         // 3. 获取代理对象
         proxy = (IVoucherOrderService) AopContext.currentProxy();
@@ -144,6 +226,46 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         // 4. 返回订单id
         return Result.ok(orderId);
     }
+
+    ///**
+    // * [优惠券秒杀下单]新版本：使用lua脚本+阻塞队列
+    // *
+    // * @param voucherId 优惠券id
+    // */
+    //public Result seckillVoucher(Long voucherId) {
+    //    // 获取用户id
+    //    Long userId = UserHolder.getUser().getId();
+    //    // 1.执行lua脚本，判断用户有无购买资格
+    //    Long result = stringRedisTemplate.execute(
+    //            SECKILL_SCRIPT,
+    //            Collections.emptyList(),
+    //            voucherId.toString(), userId.toString()
+    //    );
+    //    // 2.判断结果是否为0
+    //    int r = result.intValue();
+    //    if (r != 0) {
+    //        // 2.1 不为0，没有购买资格
+    //        return Result.fail(r == 1 ? "库存不足" : "不能重复下单");
+    //    }
+    //    // 2.2 为0，用户有购买资格，把下单信息(优惠券订单信息)保存到阻塞队列
+    //    // 订单id
+    //    long orderId = redisIdWorker.generateId("order");
+    //    VoucherOrder voucherOrder = new VoucherOrder();
+    //    // 2.3 生成订单id
+    //    voucherOrder.setId(orderId);    // 订单id，并非主键自增的，按照自定义规则生成
+    //    // 2.4 用户id
+    //    voucherOrder.setUserId(userId);
+    //    // 2.5 优惠券id
+    //    voucherOrder.setVoucherId(voucherId);
+    //    // 2.6 订单放入阻塞队列，交给异步线程处理
+    //    orderTasks.add(voucherOrder);
+    //
+    //    // 3. 获取代理对象
+    //    proxy = (IVoucherOrderService) AopContext.currentProxy();
+    //
+    //    // 4. 返回订单id
+    //    return Result.ok(orderId);
+    //}
 
     // [优惠券秒杀下单]旧版本：
     //@Override
