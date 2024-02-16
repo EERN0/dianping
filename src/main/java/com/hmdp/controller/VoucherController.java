@@ -32,7 +32,8 @@ public class VoucherController {
 
     /**
      * 新增秒杀券
-     *
+     * <p>
+     * 更新：新增秒杀券的同时，将优惠券信息保存到redis中
      * @param voucher 优惠券信息，包含秒杀信息
      * @return 优惠券id
      */

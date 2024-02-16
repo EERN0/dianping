@@ -18,8 +18,8 @@ public class SimpleRedisLock implements ILock {
     private static final String KEY_PREFIX = "lock:";    // 锁前缀名
     private static final String ID_PREFIX = UUID.randomUUID().toString(true) + "-"; // 线程标识前缀 UUID-
 
-    // static变量，在编译期间，读取lua脚本。而不是在调用对象时，加载脚本文件，减少io
-    private static final DefaultRedisScript<Long> UNLOCK_SCRIPT;
+    // 释放锁的lua脚本，保证释放锁的原子性，一行执行完
+    private static final DefaultRedisScript<Long> UNLOCK_SCRIPT;// static变量，在编译期间，读取lua脚本。而不是在调用对象时，加载脚本文件，减少io
 
     static {
         UNLOCK_SCRIPT = new DefaultRedisScript<>();
@@ -62,7 +62,7 @@ public class SimpleRedisLock implements ILock {
     }
 
     ///**
-    // * 释放锁：
+    // * 释放锁：无法保证原子性！
     // * 获取线程标识，判断是否与当前线程标识一致，一致才删掉锁
     // */
     //@Override
