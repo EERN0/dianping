@@ -11,12 +11,7 @@ import java.io.Serializable;
 import java.time.LocalDateTime;
 
 /**
- * <p>
- * 
- * </p>
- *
- * @author 虎哥
- * @since 2021-12-22
+ * tb_follow对应的实体类
  */
 @Data
 @EqualsAndHashCode(callSuper = false)
@@ -46,6 +41,4 @@ public class Follow implements Serializable {
      * 创建时间
      */
     private LocalDateTime createTime;
-
-
 }
