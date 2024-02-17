@@ -5,9 +5,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.hmdp.dto.Result;
 import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.Blog;
-import com.hmdp.entity.User;
 import com.hmdp.service.IBlogService;
-import com.hmdp.service.IUserService;
 import com.hmdp.utils.SystemConstants;
 import com.hmdp.utils.UserHolder;
 import org.springframework.web.bind.annotation.*;
@@ -47,7 +45,7 @@ public class BlogController {
         //// 修改点赞数量  update tb_blog set liked = liked + 1 where id = ?
         //blogService.update()
         //        .setSql("liked = liked + 1").eq("id", id).update();
-        return blogService.likBlog(id);
+        return blogService.likeBlog(id);
     }
 
     @GetMapping("/of/me")
@@ -81,5 +79,16 @@ public class BlogController {
     @GetMapping("/{id}")
     public Result queryBlogById(@PathVariable("id") Long id) {
         return blogService.qeryBlogById(id);
+    }
+
+
+    /**
+     * 查询blog的点赞用户信息（前5个，按时间排序）
+     *
+     * @param id 博客id
+     */
+    @GetMapping("/likes/{id}")
+    public Result queryBlogLikes(@PathVariable("id") Long id) {
+        return blogService.queryBlogLikes(id);
     }
 }
