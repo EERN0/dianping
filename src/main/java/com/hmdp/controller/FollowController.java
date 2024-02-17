@@ -30,12 +30,23 @@ public class FollowController {
 
 
     /**
-     * 查询是否关注
+     * 查询是否关注指定用户
      *
-     * @param followUserId 关注/取关的用户id
+     * @param followUserId 指定用户的id
      */
     @GetMapping("/or/not/{id}")
     public Result isFollow(@PathVariable("id") Long followUserId) {
         return followService.isFollow(followUserId);
     }
+
+    /**
+     * 查询共同关注 （当前用户 与 指定用户）
+     *
+     * @param id 指定用户
+     */
+    @GetMapping("/common/{id}")
+    public Result followCommons(@PathVariable("id") Long id) {
+        return followService.followCommons(id);
+    }
+
 }
