@@ -24,15 +24,12 @@ public class BlogController {
     private IBlogService blogService;
 
 
+    /**
+     * 保存blog，并将笔记id推送给所有粉丝
+     */
     @PostMapping
     public Result saveBlog(@RequestBody Blog blog) {
-        // 获取登录用户
-        UserDTO userDTO = UserHolder.getUser();
-        blog.setUserId(userDTO.getId());
-        // 保存探店博文
-        blogService.save(blog);
-        // 返回id
-        return Result.ok(blog.getId());
+        return blogService.saveBlog(blog);
     }
 
     /**
