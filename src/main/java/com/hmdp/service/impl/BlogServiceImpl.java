@@ -1,6 +1,7 @@
 package com.hmdp.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
+import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.hmdp.dto.Result;
 import com.hmdp.dto.UserDTO;
@@ -144,8 +145,11 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
         }
         // 2.解析出其中的用户id
         List<Long> ids = top5.stream().map(Long::valueOf).collect(Collectors.toList());
-        // 3.根据用户id查询用户
-        List<UserDTO> userDTOs = userService.listByIds(ids)
+        String idStr = StrUtil.join(",", ids);      // 把list拼接为字符串
+        // 3.根据用户id查询用户     WHERE id IN (5,1) ORDER BY FIELD(id, 5, 1)
+        List<UserDTO> userDTOs = userService.query()
+                .in("id", ids)
+                .last("ORDER BY FIELD(id," + idStr + ")").list()
                 .stream()
                 .map(user -> BeanUtil.copyProperties(user, UserDTO.class))
                 .collect(Collectors.toList());
