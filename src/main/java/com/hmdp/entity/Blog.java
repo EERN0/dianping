@@ -12,12 +12,8 @@ import java.io.Serializable;
 import java.time.LocalDateTime;
 
 /**
- * <p>
- * 
- * </p>
- *
- * @author 虎哥
- * @since 2021-12-22
+ * Blog日志类
+ * 额外加了两个字段：用户图标、用户姓名。手动维护
  */
 @Data
 @EqualsAndHashCode(callSuper = false)
@@ -32,26 +28,32 @@ public class Blog implements Serializable {
      */
     @TableId(value = "id", type = IdType.AUTO)
     private Long id;
+
     /**
      * 商户id
      */
     private Long shopId;
+
     /**
      * 用户id
      */
     private Long userId;
+
     /**
      * 用户图标
      */
     @TableField(exist = false)
     private String icon;
+
     /**
      * 用户姓名
      */
     @TableField(exist = false)
     private String name;
+
     /**
-     * 是否点赞过了
+     * 是否点赞过了。
+     * true-点赞了，false-没点赞
      */
     @TableField(exist = false)
     private Boolean isLike;
@@ -90,6 +92,4 @@ public class Blog implements Serializable {
      * 更新时间
      */
     private LocalDateTime updateTime;
-
-
 }
