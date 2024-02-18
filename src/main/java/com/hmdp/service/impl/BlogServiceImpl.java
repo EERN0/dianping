@@ -4,6 +4,7 @@ import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.hmdp.dto.Result;
+import com.hmdp.dto.ScrollResult;
 import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.Blog;
 import com.hmdp.entity.Follow;
@@ -18,13 +19,17 @@ import com.hmdp.utils.SystemConstants;
 import com.hmdp.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
+
+import static com.hmdp.utils.RedisConstants.FEED_KEY;
 
 /**
  * 服务实现类
@@ -60,11 +65,73 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
             // 4.1 获取粉丝id
             Long userId = follow.getUserId();
             // 4.2 把blogId推送给userId
-            String key = "feed:" + userId;
+            String key = FEED_KEY + userId;
             stringRedisTemplate.opsForZSet().add(key, blog.getId().toString(), System.currentTimeMillis());
+            // sorted_set中key是userId, field是blogId，value是时间戳
         }
         // 3.返回blogId
         return Result.ok(blog.getId());
+    }
+
+    /**
+     * 滚动分页查询收件箱（blog推送到粉丝收件箱——redis）
+     * <p>
+     * redis中存的feed流blog，key——feed:userId, value——blogId, score——时间戳
+     * </p>
+     *
+     * @param max    当前时间戳（第1次） || 上一次查询结果的最小时间戳（非第1次）
+     * @param offset 偏移量 第一次查询默认为0；非第一次查询 offset：在上一次查询的结果中，与最小值一样的元素的个数
+     */
+    @Override
+    public Result queryBlogOfFollow(Long max, Integer offset) {
+        // 1.获取当前用户
+        Long userId = UserHolder.getUser().getId();
+
+        // 2.查询收件箱（滚动分页查询）  ZREVRANGEBYSCORE key Max Min LIMIT offset count
+        String key = FEED_KEY + userId;
+        Set<ZSetOperations.TypedTuple<String>> typedTuples = stringRedisTemplate.opsForZSet()
+                .reverseRangeByScoreWithScores(key, 0, max, offset, 2);
+        // 非空判断
+        if (typedTuples == null || typedTuples.isEmpty()) {
+            return Result.ok();
+        }
+
+        // 3.解析数据：blogId、minTime（时间戳）、offset（偏移量）
+        List<Long> blogIds = new ArrayList<>(typedTuples.size());
+        long minTime = 0;   // 上一次查询结果的最小时间戳
+        int cnt = 1;        // 计算offset偏移量的
+
+        // 4.根据id查询blog
+        for (ZSetOperations.TypedTuple<String> tuple : typedTuples) {
+            // 4.1 获取博客id
+            blogIds.add(Long.valueOf(tuple.getValue()));
+            // 4.2 获取score
+            long time = tuple.getScore().longValue();
+            if (time == minTime) {  // 当前time和上一次的相同，cnt累加
+                cnt++;
+            } else {
+                minTime = time;
+                cnt = 1;
+            }
+        }
+        // 5.根据id查询blog,为了保证顺序, 使用 WHERE id IN (5,1) ORDER BY FIELD(id, 5, 1)
+        String blogIdsStr = StrUtil.join(",", blogIds);
+        List<Blog> blogs = query().in("id", blogIds).last("ORDER BY FIELD(id," + blogIdsStr + ")").list();
+
+        // 6.处理每个blog--点赞数
+        for (Blog blog : blogs) {
+            // 6.1 查询blog相关用户
+            queryBlogUser(blog);
+            // 6.2 查询blog是否被当前用户点赞了，并设置blog对应成员变量
+            isBlogLiked(blog);
+        }
+        // 7.封装并返回ScrollResult对象
+        ScrollResult r = new ScrollResult();
+        r.setList(blogs);
+        r.setOffset(cnt);
+        r.setMinTime(minTime);
+
+        return Result.ok(r);
     }
 
     /**

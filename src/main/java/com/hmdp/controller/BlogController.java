@@ -93,11 +93,26 @@ public class BlogController {
      * 根据用户id查询相关blog
      */
     @GetMapping("/of/user")
-    public Result queryBlogByUserId(@RequestParam(value = "current", defaultValue = "1") Integer current, @RequestParam("id") Long id) {
+    public Result queryBlogByUserId(
+            @RequestParam(value = "current", defaultValue = "1") Integer current,
+            @RequestParam("id") Long id) {
         // 根据用户查询
         Page<Blog> page = blogService.query().eq("user_id", id).page(new Page<>(current, SystemConstants.MAX_PAGE_SIZE));
         // 获取当前页数据
         List<Blog> records = page.getRecords();
         return Result.ok(records);
+    }
+
+
+    /**
+     * 滚动分页查询收件箱
+     * --@RequestParam 表示接受url地址栏传参的注解，当方法上参数的名称和url地址栏不相同时，可以通过@RequestParam来进行指定
+     *
+     * @param max    当前时间戳 | 上一次查询结果的最小时间戳
+     * @param offset 偏移量 第一次查询默认为0。非第一次查询 offset：在上一次的结果中，与最小值一样的元素的个数
+     */
+    @GetMapping("/of/follow")
+    public Result queryBlogOfFollow(@RequestParam("lastId") Long max, @RequestParam(value = "offset", defaultValue = "0") Integer offset) {
+        return blogService.queryBlogOfFollow(max, offset);
     }
 }

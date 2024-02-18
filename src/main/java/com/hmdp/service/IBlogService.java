@@ -32,4 +32,11 @@ public interface IBlogService extends IService<Blog> {
     Result queryBlogLikes(Long id);
 
 
+    /**
+     * 滚动分页查询收件箱
+     *
+     * @param max    当前时间戳 | 上一次查询结果的最小时间戳
+     * @param offset 偏移量 第一次查询默认为0。非第一次查询 offset：在上一次的结果中，与最小值一样的元素的个数
+     */
+    Result queryBlogOfFollow(Long max, Integer offset);
 }
