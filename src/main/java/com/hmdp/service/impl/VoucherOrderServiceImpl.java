@@ -68,6 +68,8 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
     // 任务类
     private class VoucherOrderHandler implements Runnable {
+
+        // 项目启动前，得在redis命令行输入，否则会死循环报错：xgroup create stream.orders g1 0 MKSTREAM
         String queueName = "stream.orders";  // 消息队列名字
 
         @Override
@@ -75,38 +77,40 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             while (true) {
                 try {
                     // 1.获取消息队列中的订单信息
-                    // XREADGROUP GROUP g1 c1(消费者组g1的c1消费者) COUNT 1(读1条消息) BLOCK 2000(阻塞2s) STREAMS stream.order(消息队列名) >(读最新的消息)
+                    // XREADGROUP GROUP g1 c1(消费者组g1里的消费者c1) COUNT 1(1条) BLOCK 2000(阻塞2s) STREAMS stream.order(消息队列名) > (>表示读队列未被消费的消息)
                     List<MapRecord<String, Object, Object>> list = stringRedisTemplate.opsForStream().read(
                             Consumer.from("g1", "c1"),
                             StreamReadOptions.empty().count(1).block(Duration.ofSeconds(2)),
-                            StreamOffset.create(queueName, ReadOffset.lastConsumed())
+                            StreamOffset.create(queueName, ReadOffset.lastConsumed())   // 获取消息队列中未消费的消息 new ReadOffset(">")
                     );
                     // 2. 判断消息获取是否成功
                     if (list == null || list.isEmpty()) {
-                        // 获取失败，说明没有消息，继续下一次循环
+                        // 如果获取失败，说明消息队列没有新消息，继续下一次循环
                         continue;
                     }
                     // 3. 解析消息中的订单消息
                     MapRecord<String, Object, Object> record = list.get(0);
                     Map<Object, Object> values = record.getValue();
                     VoucherOrder voucherOrder = BeanUtil.fillBeanWithMap(values, new VoucherOrder(), true);
-                    // 4. 如果获取成功，可以下单
+                    // 4. 如果获取成功，可以下单，处理订单消息
                     handleVoucherOrder(voucherOrder);
-                    // 5. ACK确认 SACK stream.orders g1 id
+                    // 5. ACK确认
+                    // redis命令: SACK stream.orders g1 id
                     stringRedisTemplate.opsForStream().acknowledge(queueName, "g1", record.getId());
                 } catch (Exception e) {
                     log.error("处理订单异常", e);
+                    // 消息没有被确认(出现异常)，消息进入pending-list，要取出pending-list中的订单消息，继续处理并确认
                     handlePendingList();
                 }
             }
         }
 
-        // pending-list中消息处理
+        // 处理异常的消息（未确认的订单信息），即pending-list里的，确保异常的订单一定能得到处理
         private void handlePendingList() {
             while (true) {
                 try {
                     // 1.获取pending-list中的订单信息
-                    // XREADGROUP GROUP g1 c1 COUNT 1 STREAMS stream.order 0
+                    // XREADGROUP GROUP g1 c1 COUNT 1 STREAMS stream.order 0（0表示不是从消息队列中取出消息，而是从pending-list中取出消息）
                     List<MapRecord<String, Object, Object>> list = stringRedisTemplate.opsForStream().read(
                             Consumer.from("g1", "c1"),
                             StreamReadOptions.empty().count(1),
@@ -114,31 +118,31 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
                     );
                     // 2. 判断消息获取是否成功
                     if (list == null || list.isEmpty()) {
-                        // 获取失败，说明pending-list没有消息，结束循环
+                        // 获取失败，说明pending-list没有异常的订单信息，结束循环
                         break;
                     }
                     // 3. 解析消息中的订单消息
                     MapRecord<String, Object, Object> record = list.get(0);
                     Map<Object, Object> values = record.getValue();
                     VoucherOrder voucherOrder = BeanUtil.fillBeanWithMap(values, new VoucherOrder(), true);
-                    // 4. 如果获取成功，可以下单
+                    // 4. 如果获取成功，可以下单，处理订单消息
                     handleVoucherOrder(voucherOrder);
-                    // 5. ACK确认 SACK stream.orders g1 id
+                    // 5. ACK确认 （确认pending-list里的消息，至pending-list清空）
+                    // SACK stream.orders g1 id
                     stringRedisTemplate.opsForStream().acknowledge(queueName, "g1", record.getId());
                 } catch (Exception e) {
                     log.error("处理pending-list异常", e);
                     try {
-                        Thread.sleep(20);
+                        Thread.sleep(20);   // 休眠下，避免太频繁
                     } catch (InterruptedException ex) {
                         throw new RuntimeException(ex);
                     }
                 }
             }
-
         }
     }
 
-    //// 阻塞队列（最新版本，不再使用阻塞队列）
+    //// 阻塞队列，次新版本（最新版本在上面，不再使用阻塞队列，改用消息队列）
     //private final BlockingQueue<VoucherOrder> orderTasks = new ArrayBlockingQueue<>(1024 * 1024);
     //
     //// 任务类
@@ -185,7 +189,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
 
     /**
-     * [优惠券秒杀下单]最新版本：使用lua脚本+redis消息队列
+     * [优惠券秒杀下单] 2.0最新版本：使用lua脚本+redis消息队列
      *
      * @param voucherId 优惠券id
      */
@@ -228,7 +232,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     }
 
     ///**
-    // * [优惠券秒杀下单]新版本：使用lua脚本+阻塞队列
+    // * [优惠券秒杀下单] 1.1版本：使用lua脚本+阻塞队列
     // *
     // * @param voucherId 优惠券id
     // */
@@ -267,7 +271,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     //    return Result.ok(orderId);
     //}
 
-    // [优惠券秒杀下单]旧版本：
+    // [优惠券秒杀下单] 1.0版本：
     //@Override
     //public Result seckikllVoucher(Long voucherId) {
     //    // 1.查询优惠券
