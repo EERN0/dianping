@@ -252,6 +252,18 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         // 2.删除缓存
         stringRedisTemplate.delete(RedisConstants.CACHE_SHOP_KEY + shop.getId());
 
+        // 再开一个线程，延迟双删缓存（新线程不会受到主线程事务的影响）
+        Thread deleteCacheThread = new Thread(() -> {
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+            // 延迟双删，再删一遍缓存
+            stringRedisTemplate.delete(RedisConstants.CACHE_SHOP_KEY + shop.getId());
+        });
+        deleteCacheThread.start();
+
         return Result.ok();
     }
 }
